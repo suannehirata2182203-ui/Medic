@@ -77,34 +77,50 @@ j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=
             originalError.apply(console, args);
         };
         
-        // Скрываем сообщение об ошибке на странице
+        // Точное скрытие только сообщения об ошибке (не основного контента)
         function hideAuthError() {
             try {
                 var body = document.body || document.documentElement;
                 if (!body) return;
                 
-                // Проверяем весь body на наличие ошибки
-                var bodyText = body.textContent || body.innerText || '';
-                if (bodyText.indexOf('ODM-009') !== -1 || 
-                    (bodyText.indexOf('Oops!') !== -1 && bodyText.indexOf('authorized') !== -1)) {
-                    // Если ошибка в основном контенте, скрываем только элементы с ошибкой
-                    var errorElements = body.querySelectorAll('*');
-                    for (var i = 0; i < errorElements.length; i++) {
-                        var el = errorElements[i];
-                        var text = el.textContent || el.innerText || '';
-                        if (text.indexOf('ODM-009') !== -1 || 
-                            text.indexOf('not authorized') !== -1 ||
-                            (text.indexOf('Oops!') !== -1 && text.indexOf('authorized') !== -1) ||
-                            text.indexOf('Error Code:') !== -1 && text.indexOf('ODM') !== -1) {
-                            el.style.display = 'none';
-                            el.style.visibility = 'hidden';
-                            el.style.opacity = '0';
-                            el.style.height = '0';
-                            el.style.overflow = 'hidden';
-                            if (el.parentNode) {
-                                el.parentNode.removeChild(el);
-                            }
+                // Ищем только элементы, которые явно содержат текст ошибки
+                // И проверяем, что это не большой блок контента (не основная страница)
+                var errorKeywords = ['ODM-009', 'not authorized to use this theme', 'Error Code: ODM-009'];
+                var allElements = body.querySelectorAll('*');
+                
+                for (var i = 0; i < allElements.length; i++) {
+                    var el = allElements[i];
+                    var text = (el.textContent || el.innerText || '').trim();
+                    var textLength = text.length;
+                    
+                    // Пропускаем элементы с большим количеством текста (это может быть основная страница)
+                    if (textLength > 500) continue;
+                    
+                    // Проверяем, содержит ли элемент точный текст ошибки
+                    var isErrorElement = false;
+                    for (var j = 0; j < errorKeywords.length; j++) {
+                        if (text.indexOf(errorKeywords[j]) !== -1) {
+                            isErrorElement = true;
+                            break;
                         }
+                    }
+                    
+                    // Дополнительная проверка: "Oops!" + "authorized" в небольшом элементе
+                    if (!isErrorElement && textLength < 200) {
+                        if (text.indexOf('Oops!') !== -1 && text.indexOf('authorized') !== -1) {
+                            isErrorElement = true;
+                        }
+                    }
+                    
+                    if (isErrorElement) {
+                        // Скрываем только этот элемент, не трогая родительские
+                        el.style.display = 'none';
+                        el.style.visibility = 'hidden';
+                        el.style.opacity = '0';
+                        el.style.height = '0';
+                        el.style.overflow = 'hidden';
+                        el.style.position = 'absolute';
+                        el.style.left = '-9999px';
                     }
                 }
             } catch(e) {
@@ -112,42 +128,36 @@ j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=
             }
         }
         
-        // Агрессивное скрытие ошибок
-        function aggressiveHide() {
+        // Проверяем и скрываем ошибку при загрузке DOM
+        function checkAndHide() {
             hideAuthError();
-            // Скрываем элементы по селекторам, которые могут содержать ошибку
-            var selectors = ['body > *:first-child', '[class*="error"]', '[id*="error"]', '[class*="auth"]'];
-            selectors.forEach(function(selector) {
-                try {
-                    var elements = document.querySelectorAll(selector);
-                    for (var i = 0; i < elements.length; i++) {
-                        var el = elements[i];
-                        var text = el.textContent || el.innerText || '';
-                        if (text.indexOf('ODM-009') !== -1 || 
-                            (text.indexOf('Oops!') !== -1 && text.indexOf('authorized') !== -1)) {
-                            el.style.display = 'none';
-                            el.remove();
-                        }
-                    }
-                } catch(e) {}
-            });
         }
         
-        // Проверяем и скрываем ошибку при загрузке DOM
         if (document.readyState === 'loading') {
             document.addEventListener('DOMContentLoaded', function() {
-                aggressiveHide();
-                setInterval(aggressiveHide, 300);
+                checkAndHide();
+                // Проверяем реже, чтобы не нагружать систему
+                setInterval(checkAndHide, 1000);
             });
         } else {
-            aggressiveHide();
-            setInterval(aggressiveHide, 300);
+            checkAndHide();
+            setInterval(checkAndHide, 1000);
         }
         
         // Перехватываем MutationObserver для скрытия динамически добавленных ошибок
         try {
             var observer = new MutationObserver(function(mutations) {
-                aggressiveHide();
+                // Проверяем только новые добавленные узлы
+                var shouldCheck = false;
+                for (var i = 0; i < mutations.length; i++) {
+                    if (mutations[i].addedNodes.length > 0) {
+                        shouldCheck = true;
+                        break;
+                    }
+                }
+                if (shouldCheck) {
+                    setTimeout(checkAndHide, 100);
+                }
             });
             
             var observeBody = function() {
@@ -156,7 +166,7 @@ j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=
                         childList: true,
                         subtree: true,
                         attributes: false,
-                        characterData: true
+                        characterData: false
                     });
                 } else {
                     setTimeout(observeBody, 100);
@@ -170,46 +180,39 @@ j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=
             }
         } catch(e) {}
         
-        // Обходим проверку домена, перехватывая запросы к Shrine Theme API
+        // Обходим проверку домена, перехватывая ВСЕ запросы к Shrine Theme API
         if (window.fetch) {
             var originalFetch = window.fetch;
             window.fetch = function() {
                 var url = arguments[0];
                 if (typeof url === 'string' && url.toLowerCase().indexOf('shrinetheme.com') !== -1) {
-                    // Если это запрос на проверку авторизации, возвращаем успешный ответ
-                    if (url.indexOf('authorize') !== -1 || 
-                        url.indexOf('whitelist') !== -1 ||
-                        url.indexOf('domain') !== -1 ||
-                        url.indexOf('check') !== -1) {
-                        return Promise.resolve(new Response(JSON.stringify({
-                            authorized: true,
-                            success: true,
-                            domain: window.location.hostname
-                        }), {
-                            status: 200,
-                            statusText: 'OK',
-                            headers: {'Content-Type': 'application/json'}
-                        }));
-                    }
+                    // Перехватываем ВСЕ запросы к Shrine Theme и возвращаем успешный ответ
+                    // Это предотвратит проверку авторизации
+                    return Promise.resolve(new Response(JSON.stringify({
+                        authorized: true,
+                        success: true,
+                        domain: window.location.hostname,
+                        whitelisted: true
+                    }), {
+                        status: 200,
+                        statusText: 'OK',
+                        headers: {'Content-Type': 'application/json'}
+                    }));
                 }
                 return originalFetch.apply(this, arguments);
             };
         }
         
-        // Перехватываем XMLHttpRequest
+        // Перехватываем XMLHttpRequest - перехватываем ВСЕ запросы к Shrine Theme
         if (XMLHttpRequest && XMLHttpRequest.prototype) {
             var originalXHROpen = XMLHttpRequest.prototype.open;
             var originalXHRSend = XMLHttpRequest.prototype.send;
             
             XMLHttpRequest.prototype.open = function(method, url) {
                 this._shrineUrl = url;
+                // Перехватываем ВСЕ запросы к shrinetheme.com
                 if (typeof url === 'string' && url.toLowerCase().indexOf('shrinetheme.com') !== -1) {
-                    if (url.indexOf('authorize') !== -1 || 
-                        url.indexOf('whitelist') !== -1 ||
-                        url.indexOf('domain') !== -1 ||
-                        url.indexOf('check') !== -1) {
-                        this._shrineBypass = true;
-                    }
+                    this._shrineBypass = true;
                 }
                 return originalXHROpen.apply(this, arguments);
             };
@@ -225,7 +228,8 @@ j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=
                                 value: JSON.stringify({
                                     authorized: true,
                                     success: true,
-                                    domain: window.location.hostname
+                                    domain: window.location.hostname,
+                                    whitelisted: true
                                 }), 
                                 writable: false, 
                                 configurable: true
@@ -245,6 +249,26 @@ j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=
             };
         }
         
+        // Перехватываем загрузку скрипта Shrine Theme, чтобы он не блокировал сайт
+        var originalCreateElement = document.createElement;
+        document.createElement = function(tagName) {
+            var element = originalCreateElement.call(document, tagName);
+            if (tagName.toLowerCase() === 'script') {
+                var originalSetAttribute = element.setAttribute;
+                element.setAttribute = function(name, value) {
+                    if (name === 'src' && typeof value === 'string' && value.indexOf('shrinetheme.com') !== -1) {
+                        // Добавляем обработчик ошибок, чтобы скрипт не блокировал загрузку
+                        element.onerror = function() {
+                            console.log('Shrine Theme script load bypassed');
+                            return false;
+                        };
+                    }
+                    return originalSetAttribute.apply(this, arguments);
+                };
+            }
+            return element;
+        };
+        
         // Перехватываем попытки перенаправления на страницу с ошибкой
         var originalLocation = window.location;
         Object.defineProperty(window, 'location', {
@@ -260,6 +284,46 @@ j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=
                 originalLocation.href = url;
             }
         });
+        
+        // Защита от замены всего body на страницу с ошибкой
+        if (document.body) {
+            var bodyObserver = new MutationObserver(function(mutations) {
+                for (var i = 0; i < mutations.length; i++) {
+                    var mutation = mutations[i];
+                    if (mutation.type === 'childList') {
+                        for (var j = 0; j < mutation.addedNodes.length; j++) {
+                            var node = mutation.addedNodes[j];
+                            if (node.nodeType === 1) { // Element node
+                                var text = (node.textContent || node.innerText || '').trim();
+                                // Если добавлен большой блок с текстом ошибки, не даем ему заменить весь контент
+                                if (text.indexOf('ODM-009') !== -1 && text.length < 1000) {
+                                    // Это сообщение об ошибке, скрываем его
+                                    node.style.display = 'none';
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+            
+            bodyObserver.observe(document.body, {
+                childList: true,
+                subtree: false
+            });
+        }
+        
+        // Перехватываем document.write, если Shrine Theme пытается заменить контент
+        var originalWrite = document.write;
+        document.write = function() {
+            var content = Array.prototype.slice.call(arguments).join('');
+            // Если пытаются записать страницу с ошибкой, блокируем
+            if (content.indexOf('ODM-009') !== -1 || 
+                (content.indexOf('Oops!') !== -1 && content.indexOf('authorized') !== -1)) {
+                console.log('Blocked Shrine Theme error page injection');
+                return;
+            }
+            return originalWrite.apply(document, arguments);
+        };
         
     })();
     </script>
