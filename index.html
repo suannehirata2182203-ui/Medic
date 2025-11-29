@@ -137,38 +137,61 @@
         } catch(e) {}
         
         // Обходим проверку домена, перехватывая ВСЕ запросы к Shrine Theme API
+        // И блокируем запросы аналитики к /api/collect
         if (window.fetch) {
             var originalFetch = window.fetch;
             window.fetch = function() {
                 var url = arguments[0];
-                if (typeof url === 'string' && url.toLowerCase().indexOf('shrinetheme.com') !== -1) {
-                    // Перехватываем ВСЕ запросы к Shrine Theme и возвращаем успешный ответ
-                    // Это предотвратит проверку авторизации
-                    return Promise.resolve(new Response(JSON.stringify({
-                        authorized: true,
-                        success: true,
-                        domain: window.location.hostname,
-                        whitelisted: true
-                    }), {
-                        status: 200,
-                        statusText: 'OK',
-                        headers: {'Content-Type': 'application/json'}
-                    }));
+                if (typeof url === 'string') {
+                    var urlLower = url.toLowerCase();
+                    // Блокируем запросы к Shrine Theme
+                    if (urlLower.indexOf('shrinetheme.com') !== -1) {
+                        return Promise.resolve(new Response(JSON.stringify({
+                            authorized: true,
+                            success: true,
+                            domain: window.location.hostname,
+                            whitelisted: true
+                        }), {
+                            status: 200,
+                            statusText: 'OK',
+                            headers: {'Content-Type': 'application/json'}
+                        }));
+                    }
+                    // Блокируем запросы аналитики к /api/collect (Shopify Performance Kit, Analytics)
+                    if (urlLower.indexOf('/api/collect') !== -1 || 
+                        urlLower.indexOf('monorail-edge.shopifysvc.com') !== -1 ||
+                        urlLower.indexOf('shopify-analytics') !== -1) {
+                        console.log('Blocked analytics request:', url);
+                        return Promise.resolve(new Response('', {
+                            status: 200,
+                            statusText: 'OK'
+                        }));
+                    }
                 }
                 return originalFetch.apply(this, arguments);
             };
         }
         
         // Перехватываем XMLHttpRequest - перехватываем ВСЕ запросы к Shrine Theme
+        // И блокируем запросы аналитики к /api/collect
         if (XMLHttpRequest && XMLHttpRequest.prototype) {
             var originalXHROpen = XMLHttpRequest.prototype.open;
             var originalXHRSend = XMLHttpRequest.prototype.send;
             
             XMLHttpRequest.prototype.open = function(method, url) {
                 this._shrineUrl = url;
-                // Перехватываем ВСЕ запросы к shrinetheme.com
-                if (typeof url === 'string' && url.toLowerCase().indexOf('shrinetheme.com') !== -1) {
-                    this._shrineBypass = true;
+                if (typeof url === 'string') {
+                    var urlLower = url.toLowerCase();
+                    // Перехватываем ВСЕ запросы к shrinetheme.com
+                    if (urlLower.indexOf('shrinetheme.com') !== -1) {
+                        this._shrineBypass = true;
+                    }
+                    // Блокируем запросы аналитики к /api/collect
+                    if (urlLower.indexOf('/api/collect') !== -1 || 
+                        urlLower.indexOf('monorail-edge.shopifysvc.com') !== -1 ||
+                        urlLower.indexOf('shopify-analytics') !== -1) {
+                        this._analyticsBlocked = true;
+                    }
                 }
                 return originalXHROpen.apply(this, arguments);
             };
@@ -201,7 +224,45 @@
                     }, 10);
                     return;
                 }
+                // Блокируем запросы аналитики
+                if (this._analyticsBlocked) {
+                    console.log('Blocked analytics XHR request');
+                    var self = this;
+                    setTimeout(function() {
+                        try {
+                            Object.defineProperty(self, 'status', {value: 200, writable: false, configurable: true});
+                            Object.defineProperty(self, 'statusText', {value: 'OK', writable: false, configurable: true});
+                            Object.defineProperty(self, 'responseText', {value: '', writable: false, configurable: true});
+                            Object.defineProperty(self, 'readyState', {value: 4, writable: false, configurable: true});
+                            if (self.onreadystatechange) {
+                                self.onreadystatechange();
+                            }
+                            if (self.onload) {
+                                self.onload();
+                            }
+                        } catch(e) {}
+                    }, 10);
+                    return;
+                }
                 return originalXHRSend.apply(this, arguments);
+            };
+        }
+        
+        // Блокируем sendBeacon для аналитики (используется Shopify Performance Kit)
+        if (window.navigator && window.navigator.sendBeacon) {
+            var originalSendBeacon = window.navigator.sendBeacon;
+            window.navigator.sendBeacon = function(url, data) {
+                if (typeof url === 'string') {
+                    var urlLower = url.toLowerCase();
+                    // Блокируем запросы аналитики
+                    if (urlLower.indexOf('/api/collect') !== -1 || 
+                        urlLower.indexOf('monorail-edge.shopifysvc.com') !== -1 ||
+                        urlLower.indexOf('shopify-analytics') !== -1) {
+                        console.log('Blocked analytics sendBeacon request');
+                        return true; // Возвращаем true, чтобы скрипт думал, что запрос успешен
+                    }
+                }
+                return originalSendBeacon.apply(this, arguments);
             };
         }
         
